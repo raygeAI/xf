@@ -1,0 +1,5 @@
+hotel_price/data/*
+hotel_price/model/*
+*.pyc
+hotel_price/*.log
+hotel_price/catboost_info/*

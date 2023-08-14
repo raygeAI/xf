@@ -3,3 +3,6 @@ hotel_price/model/*
 *.pyc
 hotel_price/*.log
 hotel_price/catboost_info/*
+
+car_text_match/data/*
+car_text_match/model/*

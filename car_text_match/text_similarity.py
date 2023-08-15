@@ -4,10 +4,12 @@ import pandas as pd
 import numpy as np
 import torch
 from torch import nn
-from typing import List, Union
+from typing import List, Union, Tuple
 from torch.utils.data import DataLoader
 from sklearn.preprocessing import normalize
 from sklearn.metrics import f1_score
+from sklearn.model_selection import StratifiedShuffleSplit
+from pandas import DataFrame
 from scipy.spatial.distance import cdist
 from sentence_transformers import SentenceTransformer, models, losses, InputExample, evaluation
 
@@ -41,6 +43,17 @@ class TextSimilarity:
         # 开启模型训练
         self.fit()
 
+    # stratified_sampling 分层抽样，要求对每个类别的样本个数至少大于1个
+    @staticmethod
+    def stratified_sampling(dataframe: DataFrame) -> Tuple[DataFrame, DataFrame]:
+        stratified_sample = StratifiedShuffleSplit(n_splits=1, test_size=1 - FRAC, random_state=SEED)
+        for train_index, test_index in stratified_sample.split(dataframe, dataframe['规则id']):
+            # 训练集合
+            train_set = dataframe.loc[train_index]
+            # 保证测试集
+            test_set = dataframe.loc[test_index]
+        return train_set, test_set
+
     # _create_dataset 创建数据集合
     def _create_dataset(self, train_data_file: str, rule_data_file: str) -> List[InputExample]:
         train_data = pd.read_csv(train_data_file)
@@ -49,10 +62,12 @@ class TextSimilarity:
         rules['规则id'] = rules['规则id'].astype(str)
         self.rules = rules
         train_data = pd.merge(train_data, rules, left_on='规则id', right_on='规则id', how='inner')
-        # 测试集合
-        train_data_sample = train_data.sample(frac=FRAC, random_state=SEED)
-        # 验证集合
-        evaluate_data_sample = train_data[~train_data.index.isin(train_data_sample.index)]
+        # print(train_data["规则id"].value_counts())
+        # # 测试集合
+        # train_data_sample = train_data.sample(frac=FRAC, random_state=SEED)
+        # # 验证集合
+        # evaluate_data_sample = train_data[~train_data.index.isin(train_data_sample.index)]
+        train_data_sample, evaluate_data_sample = self.stratified_sampling(train_data)
         self.evaluate_data_sample = evaluate_data_sample
         train_examples = []
         for index, row in train_data_sample.iterrows():
@@ -69,7 +84,7 @@ class TextSimilarity:
                 train_examples.append(InputExample(texts=[row.text, pos_rule], label=self.label_smoothing(1.0)))
         return train_examples
 
-    # label_smooth 计算标签平滑
+    # label_smoothing 计算标签平滑
     @staticmethod
     def label_smoothing(label) -> float:
         if label == 0.0:
@@ -80,29 +95,32 @@ class TextSimilarity:
 
     def create_model(self) -> SentenceTransformer:
         word_embedding_model = models.Transformer(self.pretrain_model_file, max_seq_length=512, do_lower_case=True)
-        word_embedding_model.tokenizer.add_tokens(self.extra_tokens, special_tokens=True)
-        word_embedding_model.auto_model.resize_token_embeddings(len(word_embedding_model.tokenizer))
+        # 数据集太小，不足以调整token的参数
+        # word_embedding_model.tokenizer.add_tokens(self.extra_tokens, special_tokens=True)
+        # word_embedding_model.auto_model.resize_token_embeddings(len(word_embedding_model.tokenizer))
         pooling_model = models.Pooling(
             word_embedding_model.get_word_embedding_dimension(),
-            pooling_mode_cls_token=True,
-            pooling_mode_mean_tokens=False,
-            pooling_mode_mean_sqrt_len_tokens=False,
+            pooling_mode_cls_token=False,
+            pooling_mode_max_tokens=False,
+            pooling_mode_mean_tokens=False, # 设置为True ，取得0.74 的最佳结果
+            pooling_mode_mean_sqrt_len_tokens=True,
         )
-        dense_model = models.Dense(in_features=pooling_model.get_sentence_embedding_dimension(), out_features=512,
-                                   activation_function=nn.Tanh())
+        # dense_model = models.Dense(in_features=pooling_model.get_sentence_embedding_dimension(), out_features=512,
+        #                            activation_function=nn.Tanh())
         model = SentenceTransformer(modules=[
             word_embedding_model,
             pooling_model,
-            dense_model
+            # dense_model
         ])
         return model
 
     # fit 训练模型
     def fit(self) -> SentenceTransformer:
-        model = SentenceTransformer(self.pretrain_model_file)
+        # model = SentenceTransformer(self.pretrain_model_file)
+        model = self.create_model()
         print("......model architecture......:\n", model)
         train_loss = losses.CosineSimilarityLoss(model, loss_fct=nn.MSELoss())
-        train_dataloader = DataLoader(self.train_examples[:], shuffle=True, batch_size=16,)
+        train_dataloader = DataLoader(self.train_examples[:], shuffle=True, batch_size=16, )
         model.fit(train_objectives=[(train_dataloader, train_loss)], epochs=EPOCHS, warmup_steps=10)
         model.save(self.finetune_model_path, self.finetune_model_file)
         return model

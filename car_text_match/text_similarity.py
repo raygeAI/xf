@@ -71,14 +71,14 @@ class TextSimilarity:
         self.evaluate_data_sample = evaluate_data_sample
         train_examples = []
         for index, row in train_data_sample.iterrows():
-            neg_rules = rules['规则表达式'].sample(5).values
+            neg_rules = rules['规则表达式'].sample(3).values
             pos_rule = row['规则表达式']
 
-            for text in neg_rules:
-                if text == row['规则表达式']:
+            for neg_rule in neg_rules:
+                if neg_rule == row['规则表达式']:
                     continue
                 # 构造一些负样本
-                train_examples.append(InputExample(texts=[row.text, text], label=self.label_smoothing(0.0)))
+                train_examples.append(InputExample(texts=[row.text, neg_rule], label=self.label_smoothing(0.0)))
 
             if pos_rule is not np.nan:
                 train_examples.append(InputExample(texts=[row.text, pos_rule], label=self.label_smoothing(1.0)))
@@ -88,7 +88,7 @@ class TextSimilarity:
     @staticmethod
     def label_smoothing(label) -> float:
         if label == 0.0:
-            return 0.05
+            return 0.02
         if label == 1.00:
             return 0.95
         return label
@@ -102,8 +102,8 @@ class TextSimilarity:
             word_embedding_model.get_word_embedding_dimension(),
             pooling_mode_cls_token=False,
             pooling_mode_max_tokens=False,
-            pooling_mode_mean_tokens=False, # 设置为True ，取得0.74 的最佳结果
-            pooling_mode_mean_sqrt_len_tokens=True,
+            pooling_mode_mean_tokens=False,  # 设置为True ，取得0.74 的最佳结果
+            pooling_mode_mean_sqrt_len_tokens=True,  # 0.746
         )
         # dense_model = models.Dense(in_features=pooling_model.get_sentence_embedding_dimension(), out_features=512,
         #                            activation_function=nn.Tanh())
